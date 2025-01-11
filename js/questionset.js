@@ -71,7 +71,8 @@ H5P.QuestionSet = function (options, contentId, contentData) {
       unansweredText: 'Unanswered',
       answeredText: 'Answered',
       currentQuestionText: 'Current question',
-      navigationLabel: 'Questions'
+      navigationLabel: 'Questions',
+      questionSetInstruction: 'Choose question to display'
     },
     endGame: {
       showResultPage: true,
@@ -566,7 +567,7 @@ H5P.QuestionSet = function (options, contentId, contentData) {
   // Create html for progress announcer
   self.$progressAnnouncer = $('<div>', {
     class: 'qs-progress-announcer',
-    tabindex: '-1'
+    'aria-live': 'polite',
   });
 
   // Create html for questionset
@@ -574,9 +575,15 @@ H5P.QuestionSet = function (options, contentId, contentData) {
     class: 'questionset',
   });
 
+  const tabIDs = Array.from({length: params.questions.length}, () => H5P.createUUID());
+  const tabPanelIDs = Array.from({length: params.questions.length}, () => H5P.createUUID());
+
   for (let i = 0; i < params.questions.length; i++) {
     $('<div>', {
       class: 'question-container',
+      role: 'tabpanel',
+      id: tabPanelIDs[i],
+      'aria-labelledby': tabIDs[i],
       appendTo: self.$questionsContainer
     });
   }
@@ -598,6 +605,8 @@ H5P.QuestionSet = function (options, contentId, contentData) {
   if (params.progressType == "dots") {
     self.$dotsContainer = $('<ul>', {
       class: 'dots-container',
+      role: 'tablist',
+      'aria-label': params.texts.questionSetInstruction,
       appendTo: self.$progressBar
     });
 
@@ -607,6 +616,9 @@ H5P.QuestionSet = function (options, contentId, contentData) {
         html: '<a href="#" class= "progress-dot unanswered ' +
           (params.disableBackwardsNavigation ? 'disabled' : '') +
           '" ' +
+          'id="' +
+          tabIDs[i] +
+          '" ' +
           'aria-label=' +
           '"' +
           params.texts.jumpToQuestion.replace("%d", i + 1).replace("%total", params.questions.length) +
@@ -615,7 +627,11 @@ H5P.QuestionSet = function (options, contentId, contentData) {
           '" ' +
           'tabindex="-1" ' +
           (params.disableBackwardsNavigation ? 'aria-disabled="true"' : '') +
-          '></a>',
+          ' aria-controls="' +
+          tabPanelIDs[i] +
+          '" ' +
+          'aria-selected="false" ' +
+          'role="tab"></a>',
         appendTo: self.$dotsContainer
       })
     }
@@ -673,7 +689,7 @@ H5P.QuestionSet = function (options, contentId, contentData) {
     }
   };
 
-  var _showQuestion = function (questionNumber, preventAnnouncement, moveFocus = true) {
+  var _showQuestion = function (questionNumber, preventAnnouncement) {
     // Sanitize input.
     if (questionNumber < 0) {
       questionNumber = 0;
@@ -722,12 +738,7 @@ H5P.QuestionSet = function (options, contentId, contentData) {
           .replace('@current', (currentQuestion + 1).toString())
           .replace('@total', questionInstances.length.toString());
 
-        $('.qs-progress-announcer', $myDom)
-          .html(humanizedProgress)
-        if (moveFocus || self.isRoot()) {
-          $('.qs-progress-announcer', $myDom)
-            .show().focus();
-        }
+        self.$progressAnnouncer.html(humanizedProgress);
 
         if (instance && instance.readFeedback) {
           instance.readFeedback();
@@ -871,7 +882,26 @@ H5P.QuestionSet = function (options, contentId, contentData) {
     currentQuestion = 0;
 
     // Show the first question again
-    _showQuestion(params.initialQuestion, false, moveFocus);
+    $myDom.children().hide();
+    var $intro = $('.intro-page', $myDom);
+    if ($intro.length) {
+      // Show intro
+      $('.intro-page', $myDom).show();
+      if (moveFocus) {
+        $('.qs-startbutton', $myDom).focus();
+      }
+    }
+    else {
+      // Show first question
+      $('.questionset', $myDom).show();
+      _showQuestion(params.initialQuestion);
+      if (moveFocus) {
+        // Focus first tabbable element
+        $myDom[0].querySelectorAll(
+          'audio, button, input, select, textarea, video, [contenteditable], [href], [tabindex="0"]'
+        )[0].focus();
+      }
+    }
   };
 
   var rendered = false;
@@ -910,6 +940,8 @@ H5P.QuestionSet = function (options, contentId, contentData) {
     }
 
     if (currentQuestion + direction >= questionInstances.length) {
+      toggleCurrentDot(currentQuestion, false);
+      toggleAnsweredDot(currentQuestion, questionInstances[currentQuestion].getAnswerGiven());
       _displayEndGame();
       self.channel.postMessage('finish-button-pressed')
     } else {
@@ -970,7 +1002,8 @@ H5P.QuestionSet = function (options, contentId, contentData) {
     var disabledTabindex = params.disableBackwardsNavigation && !showingSolutions;
     $el.toggleClass('current', isCurrent)
       .attr('aria-label', label)
-      .attr('tabindex', isCurrent && !disabledTabindex ? 0 : -1);
+      .attr('tabindex', isCurrent && !disabledTabindex ? 0 : -1)
+      .attr('aria-selected', isCurrent && !disabledTabindex);
   };
 
   var _displayEndGame = function () {
@@ -1094,36 +1127,25 @@ H5P.QuestionSet = function (options, contentId, contentData) {
         });
         hookUpButton('.qs-retrybutton', function () {
           self.resetTask(true);
-          $myDom.children().hide();
           self.$clock.show()
-          var $intro = $('.intro-page', $myDom);
-          if ($intro.length) {
-            // Show intro
-            $('.intro-page', $myDom).show();
-            $('.qs-startbutton', $myDom).focus();
+          allowCountDownStart = false;
+          allowCountUpStart = false;
+          countDownStarted = false;
+          countUpStarted = false;
+          timePassed = 0;
+          timerInterval = null;
+          remainingPathColor = COLOR_CODES.info.color;
+          isCountDown = initialParams.timerSetting > 0
+          timeLeftState = initialParams.timerSetting
+          countUpTimeState = 0
+          hasFinished = false
+          displayStartTime = isCountDown ? formatTime(timeLeftState) : formatTime(countUpTimeState)
+          if (!isCountDown) {
+            allowCountUpStart = true
+            startTimerUp(countUpTimeState)
           } else {
-            // Show first question
-            $('.questionset', $myDom).show();
-            allowCountDownStart = false;
-            allowCountUpStart = false;
-            countDownStarted = false;
-            countUpStarted = false;
-            timePassed = 0;
-            timerInterval = null;
-            remainingPathColor = COLOR_CODES.info.color;
-            isCountDown = initialParams.timerSetting > 0
-            timeLeftState = initialParams.timerSetting
-            countUpTimeState = 0
-            hasFinished = false
-            displayStartTime = isCountDown ? formatTime(timeLeftState) : formatTime(countUpTimeState)
-            if (!isCountDown) {
-              allowCountUpStart = true
-              startTimerUp(countUpTimeState)
-            } else {
-              allowCountDownStart = true
-              startTimerDown(timeLeftState)
-            }
-            _showQuestion(params.initialQuestion);
+            allowCountDownStart = true
+            startTimerDown(timeLeftState)
           }
         });
 
@@ -1135,13 +1157,12 @@ H5P.QuestionSet = function (options, contentId, contentData) {
 
         // Announce that the question set is complete
         setTimeout(function () {
-          $('.qs-progress-announcer', $myDom)
+          self.$progressAnnouncer
             .html(eparams.message +
               scoreString + '.' +
               (params.endGame.scoreBarLabel).replace('@finals', finals).replace('@totals', totals) + '.' +
               eparams.comment + '.' +
-              eparams.resulttext)
-            .show().focus();
+              eparams.resulttext);
           scoreBar.setMaxScore(totals);
           scoreBar.setScore(finals);
         }, 0);
@@ -1291,8 +1312,9 @@ H5P.QuestionSet = function (options, contentId, contentData) {
 
     // Render own DOM into target.
     $myDom.children().remove();
-    
-    $myDom.append(self.$clock, self.$introPage, self.$progressAnnouncer, self.$questionsContainer);
+    $myDom.append(self.$introPage, self.$questionsContainer);
+    $myDom.parent().append(self.$progressAnnouncer);
+
     if (params.backgroundImage !== undefined) {
       $myDom.css({
         overflow: 'hidden',
