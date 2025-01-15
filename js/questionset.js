@@ -508,7 +508,6 @@ H5P.QuestionSet = function (options, contentId, contentData) {
     });
   }
 
-
   // bring timer
   self.$clock = $('<div>', {
     class: 'running-timer-container',
@@ -1312,7 +1311,20 @@ H5P.QuestionSet = function (options, contentId, contentData) {
 
     // Render own DOM into target.
     $myDom.children().remove();
-    $myDom.append(self.$introPage, self.$questionsContainer);
+    // $myDom.append(self.$introPage, self.$questionsContainer);
+    self.$resultPage = $('<div>', {
+      'class': 'questionset-results'
+    });
+
+    $('<div>', {
+      class: 'scores',
+      html: `<p>Your score is: ${this.getScore()} / ${this.getMaxScore()}</p>`,
+      appendTo: self.$resultPage
+    });
+
+    var thirdCom = hasFinished ? self.$resultPage : self.$introPage;
+
+    $myDom.append(self.$clock, thirdCom, self.$questionsContainer);
     $myDom.parent().append(self.$progressAnnouncer);
 
     if (params.backgroundImage !== undefined) {
